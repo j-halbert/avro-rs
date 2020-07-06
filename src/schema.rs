@@ -142,32 +142,6 @@ impl PartialEq for Schema {
 
 impl Eq for Schema {}
 
-/// This type is used to simplify enum variant comparison between `Schema` and `types::Value`.
-/// It may have utility as part of the public API, but defining as `pub(crate)` for now.
-///
-/// **NOTE** This type was introduced due to a limitation of `mem::discriminant` requiring a _value_
-/// be constructed in order to get the discriminant, which makes it difficult to implement a
-/// function that maps from `Discriminant<Schema> -> Discriminant<Value>`. Conversion into this
-/// intermediate type should be especially fast, as the number of enum variants is small, which
-/// _should_ compile into a jump-table for the conversion.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum SchemaKind {
-    Null,
-    Boolean,
-    Int,
-    Long,
-    Float,
-    Double,
-    Bytes,
-    String,
-    Array,
-    Map,
-    Union,
-    Record,
-    Enum,
-    Fixed,
-}
-
 impl fmt::Display for SchemaKind {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         match *self {
@@ -185,29 +159,6 @@ impl fmt::Display for SchemaKind {
             Record => write!(fmt, "record"),
             Enum => write!(fmt, "enum"),
             Fixed => write!(fmt, "fixed"),
-        }
-    }
-}
-
-impl<'a> From<&'a Schema> for SchemaKind {
-    #[inline(always)]
-    fn from(schema: &'a Schema) -> SchemaKind {
-        // NOTE: I _believe_ this will always be fast as it should convert into a jump table.
-        match schema {
-            Schema::Null => SchemaKind::Null,
-            Schema::Boolean => SchemaKind::Boolean,
-            Schema::Int => SchemaKind::Int,
-            Schema::Long => SchemaKind::Long,
-            Schema::Float => SchemaKind::Float,
-            Schema::Double => SchemaKind::Double,
-            Schema::Bytes => SchemaKind::Bytes,
-            Schema::String => SchemaKind::String,
-            Schema::Array(_) => SchemaKind::Array,
-            Schema::Map(_) => SchemaKind::Map,
-            Schema::Union(_) => SchemaKind::Union,
-            Schema::Record { .. } => SchemaKind::Record,
-            Schema::Enum { .. } => SchemaKind::Enum,
-            Schema::Fixed { .. } => SchemaKind::Fixed,
         }
     }
 }
