@@ -345,25 +345,28 @@ impl UnionSchema {
         let mut nindex = HashMap::new();
 
         for (i, schema) in schemas.iter().enumerate() {
-            if let Schema::Union(_) = schema {
-                return Err(
-                    ParseSchemaError::new("Unions may not directly contain a union").into(),
-                );
-            }
+            match schema {
+                Schema::Union(_) => {
+                    return Err(
+                        ParseSchemaError::new("Unions may not directly contain a union").into(),
+                    );
+                },
+                Schema::Record { name, .. } => {
+                    let full_name = name.fullname(None);
+                    if nindex.insert(full_name.clone(), i).is_some() {
+                        return Err(ParseSchemaError::new(
+                            format!("Union may not contain multiple named types with the same name ({})", &full_name)
+                        ))?;
+                    }
 
-            if let Schema::Record { name, .. } = schema {
-                let full_name = name.fullname(None);
-                if nindex.insert(full_name.clone(), i).is_some() {
-                    Err(ParseSchemaError::new(
-                        format!("Union may not contain multiple named types with the same name ({})", &full_name)
-                    ))?;
+                },
+                _ => {
+
+                    let kind = SchemaKind::from(schema);
+                    if vindex.insert(kind, i).is_some() {
+                        return Err(ParseSchemaError::new("Unions cannot contain duplicate types").into());
+                    }
                 }
-
-            }
-
-            let kind = SchemaKind::from(schema);
-            if vindex.insert(kind, i).is_some() {
-                return Err(ParseSchemaError::new("Unions cannot contain duplicate types").into());
             }
         }
         Ok(UnionSchema {
