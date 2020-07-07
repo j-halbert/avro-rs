@@ -1,6 +1,6 @@
 [package]
 name = "avro-rs"
-version = "0.10.0"
+version = "0.7.0"
 authors = ["Flavien Raynaud <flavien.raynaud@gmail.com>", "Antonio Verardi <antonio.uccio.verardi@gmail.com>"]
 description = "Library for working with Apache Avro in Rust"
 license = "MIT"
@@ -8,48 +8,21 @@ readme = "README.md"
 repository = "https://github.com/flavray/avro-rs"
 edition = "2018"
 
-[badges]
-travis-ci = { repository = "flavray/avro-rs" }
-
 [features]
-snappy = ["crc", "snap"]
-
-[lib]
-path = "src/lib.rs"
-# disable benchmarks to allow passing criterion arguments to `cargo bench`
-bench = false
-
-[[bench]]
-name = "serde"
-harness = false
-
-[[bench]]
-name = "serde_json"
-harness = false
-
-[[bench]]
-name = "single"
-harness = false
+snappy = ["byteorder", "crc", "snap"]
 
 [dependencies]
-byteorder = "1.0.0"
+byteorder = { version = "1.0.0", optional = true }
 crc = { version = "1.3.0", optional = true }
-digest = "0.9"
+digest = "0.8"
 failure = "0.1.5"
 libflate = "0.1"
-num-bigint = "0.2.6"
 rand = "0.4"
-serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 snap = { version = "0.2.3", optional = true }
-strum = "0.18.0"
-strum_macros = "0.18.0"
-typed-builder = "0.5.1"
-uuid = { version = "0.8.1", features = ["v4"] }
-zerocopy = "0.3.0"
 
 [dev-dependencies]
-md-5 = "0.9"
+md-5 = "0.8"
 lazy_static = "^1.1"
-sha2 = "0.9"
-criterion = "0.3.1"
+sha2 = "0.8"

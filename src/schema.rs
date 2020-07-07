@@ -1,7 +1,6 @@
 //! Logic for parsing and interacting with schemas in Avro format.
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
-use std::convert::TryInto;
 use std::fmt;
 
 use digest::Digest;
@@ -10,7 +9,7 @@ use serde::{
     ser::{SerializeMap, SerializeSeq},
     Deserialize, Serialize, Serializer,
 };
-use serde_json::{Map, Value};
+use serde_json::{self, Map, Value};
 
 use crate::types;
 use crate::util::MapHelper;
@@ -53,8 +52,7 @@ impl fmt::Display for SchemaFingerprint {
 /// Represents any valid Avro schema
 /// More information about Avro schemas can be found in the
 /// [Avro Specification](https://avro.apache.org/docs/current/spec.html#schemas)
-#[derive(Clone, Debug, strum_macros::EnumDiscriminants)]
-#[strum_discriminants(name(SchemaKind), derive(Hash))]
+#[derive(Clone, Debug)]
 pub enum Schema {
     /// A `null` Avro schema.
     Null,
@@ -101,33 +99,6 @@ pub enum Schema {
     },
     /// A `fixed` Avro schema.
     Fixed { name: Name, size: usize },
-    /// Logical type which represents `Decimal` values. The underlying type is serialized and
-    /// deserialized as `Schema::Bytes` or `Schema::Fixed`.
-    ///
-    /// `scale` defaults to 0 and is an integer greater than or equal to 0 and `precision` is an
-    /// integer greater than 0.
-    Decimal {
-        precision: DecimalMetadata,
-        scale: DecimalMetadata,
-        inner: Box<Schema>,
-    },
-    /// A universally unique identifier, annotating a string.
-    Uuid,
-    /// Logical type which represents the number of days since the unix epoch.
-    /// Serialization format is `Schema::Int`.
-    Date,
-    /// The time of day in number of milliseconds after midnight with no reference any calendar,
-    /// time zone or date in particular.
-    TimeMillis,
-    /// The time of day in number of microseconds after midnight with no reference any calendar,
-    /// time zone or date in particular.
-    TimeMicros,
-    /// An instant in time represented as the number of milliseconds after the UNIX epoch.
-    TimestampMillis,
-    /// An instant in time represented as the number of microseconds after the UNIX epoch.
-    TimestampMicros,
-    /// An amount of time defined by a number of months, days and milliseconds.
-    Duration,
 }
 
 impl PartialEq for Schema {
@@ -141,6 +112,32 @@ impl PartialEq for Schema {
 }
 
 impl Eq for Schema {}
+
+/// This type is used to simplify enum variant comparison between `Schema` and `types::Value`.
+/// It may have utility as part of the public API, but defining as `pub(crate)` for now.
+///
+/// **NOTE** This type was introduced due to a limitation of `mem::discriminant` requiring a _value_
+/// be constructed in order to get the discriminant, which makes it difficult to implement a
+/// function that maps from `Discriminant<Schema> -> Discriminant<Value>`. Conversion into this
+/// intermediate type should be especially fast, as the number of enum variants is small, which
+/// _should_ compile into a jump-table for the conversion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum SchemaKind {
+    Null,
+    Boolean,
+    Int,
+    Long,
+    Float,
+    Double,
+    Bytes,
+    String,
+    Array,
+    Map,
+    Union,
+    Record,
+    Enum,
+    Fixed,
+}
 
 impl fmt::Display for SchemaKind {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
@@ -163,48 +160,47 @@ impl fmt::Display for SchemaKind {
     }
 }
 
-impl SchemaKind {
-    pub fn is_primitive(self) -> bool {
-        match self {
-            SchemaKind::Null
-            | SchemaKind::Boolean
-            | SchemaKind::Int
-            | SchemaKind::Long
-            | SchemaKind::Double
-            | SchemaKind::Float
-            | SchemaKind::Bytes
-            | SchemaKind::String => true,
-            _ => false,
+impl<'a> From<&'a Schema> for SchemaKind {
+    #[inline(always)]
+    fn from(schema: &'a Schema) -> SchemaKind {
+        // NOTE: I _believe_ this will always be fast as it should convert into a jump table.
+        match schema {
+            Schema::Null => SchemaKind::Null,
+            Schema::Boolean => SchemaKind::Boolean,
+            Schema::Int => SchemaKind::Int,
+            Schema::Long => SchemaKind::Long,
+            Schema::Float => SchemaKind::Float,
+            Schema::Double => SchemaKind::Double,
+            Schema::Bytes => SchemaKind::Bytes,
+            Schema::String => SchemaKind::String,
+            Schema::Array(_) => SchemaKind::Array,
+            Schema::Map(_) => SchemaKind::Map,
+            Schema::Union(_) => SchemaKind::Union,
+            Schema::Record { .. } => SchemaKind::Record,
+            Schema::Enum { .. } => SchemaKind::Enum,
+            Schema::Fixed { .. } => SchemaKind::Fixed,
         }
     }
 }
 
 impl<'a> From<&'a types::Value> for SchemaKind {
-    fn from(value: &'a types::Value) -> Self {
-        use crate::types::Value;
+    #[inline(always)]
+    fn from(value: &'a types::Value) -> SchemaKind {
         match value {
-            Value::Null => Self::Null,
-            Value::Boolean(_) => Self::Boolean,
-            Value::Int(_) => Self::Int,
-            Value::Long(_) => Self::Long,
-            Value::Float(_) => Self::Float,
-            Value::Double(_) => Self::Double,
-            Value::Bytes(_) => Self::Bytes,
-            Value::String(_) => Self::String,
-            Value::Array(_) => Self::Array,
-            Value::Map(_) => Self::Map,
-            Value::Union(_) => Self::Union,
-            Value::Record(_) => Self::Record,
-            Value::Enum(_, _) => Self::Enum,
-            Value::Fixed(_, _) => Self::Fixed,
-            Value::Decimal { .. } => Self::Decimal,
-            Value::Uuid(_) => Self::Uuid,
-            Value::Date(_) => Self::Date,
-            Value::TimeMillis(_) => Self::TimeMillis,
-            Value::TimeMicros(_) => Self::TimeMicros,
-            Value::TimestampMillis(_) => Self::TimestampMillis,
-            Value::TimestampMicros(_) => Self::TimestampMicros,
-            Value::Duration { .. } => Self::Duration,
+            types::Value::Null => SchemaKind::Null,
+            types::Value::Boolean(_) => SchemaKind::Boolean,
+            types::Value::Int(_) => SchemaKind::Int,
+            types::Value::Long(_) => SchemaKind::Long,
+            types::Value::Float(_) => SchemaKind::Float,
+            types::Value::Double(_) => SchemaKind::Double,
+            types::Value::Bytes(_) => SchemaKind::Bytes,
+            types::Value::String(_) => SchemaKind::String,
+            types::Value::Array(_) => SchemaKind::Array,
+            types::Value::Map(_) => SchemaKind::Map,
+            types::Value::Union(_) => SchemaKind::Union,
+            types::Value::Record(_) => SchemaKind::Record,
+            types::Value::Enum(_, _) => SchemaKind::Enum,
+            types::Value::Fixed(_, _) => SchemaKind::Fixed,
         }
     }
 }
@@ -325,7 +321,10 @@ impl RecordField {
             .ok_or_else(|| ParseSchemaError::new("No `name` in record field"))?;
 
         // TODO: "type" = "<record name>"
-        let schema = Schema::parse_complex(field)?;
+        let schema = field
+            .get("type")
+            .ok_or_else(|| ParseSchemaError::new("No `type` in record field").into())
+            .and_then(|type_| Schema::parse(type_))?;
 
         let default = field.get("default").cloned();
 
@@ -353,7 +352,7 @@ impl RecordField {
 
 #[derive(Debug, Clone)]
 pub struct UnionSchema {
-    pub(crate) schemas: Vec<Schema>,
+    schemas: Vec<Schema>,
     // Used to ensure uniqueness of schema inputs, and provide constant time finding of the
     // schema index given a value.
     name_index: HashMap<String, usize>,
@@ -459,40 +458,6 @@ impl PartialEq for UnionSchema {
     }
 }
 
-type DecimalMetadata = usize;
-pub(crate) type Precision = DecimalMetadata;
-pub(crate) type Scale = DecimalMetadata;
-
-fn parse_json_integer_for_decimal(value: &serde_json::Number) -> Result<DecimalMetadata, Error> {
-    if value.is_u64() {
-        Ok(value
-            .as_u64()
-            .ok_or_else(|| {
-                ParseSchemaError::new(format!(
-                    "JSON value {} claims to be u64 but cannot be converted",
-                    value
-                ))
-            })?
-            .try_into()?)
-    } else if value.is_i64() {
-        Ok(value
-            .as_i64()
-            .ok_or_else(|| {
-                ParseSchemaError::new(format!(
-                    "JSON value {} claims to be i64 but cannot be converted",
-                    value
-                ))
-            })?
-            .try_into()?)
-    } else {
-        Err(ParseSchemaError::new(format!(
-            "Invalid JSON value for decimal precision/scale integer: {}",
-            value
-        ))
-        .into())
-    }
-}
-
 impl Schema {
     /// Create a `Schema` from a string representing a JSON Avro schema.
     pub fn parse_str(input: &str) -> Result<Self, Error> {
@@ -529,9 +494,9 @@ impl Schema {
     /// https://avro.apache.org/docs/current/spec.html#schema_fingerprints
     pub fn fingerprint<D: Digest>(&self) -> SchemaFingerprint {
         let mut d = D::new();
-        d.update(self.canonical_form());
+        d.input(self.canonical_form());
         SchemaFingerprint {
-            bytes: d.finalize().to_vec(),
+            bytes: d.result().to_vec(),
         }
     }
 
@@ -551,115 +516,12 @@ impl Schema {
         }
     }
 
-    fn parse_precision_and_scale(
-        complex: &Map<String, Value>,
-    ) -> Result<(Precision, Scale), Error> {
-        fn get_decimal_integer(
-            complex: &Map<String, Value>,
-            key: &str,
-        ) -> Result<DecimalMetadata, Error> {
-            match complex.get(key) {
-                Some(&Value::Number(ref value)) => parse_json_integer_for_decimal(value),
-                None => {
-                    Err(ParseSchemaError::new(format!("{} missing for decimal type", key)).into())
-                }
-                precision => Err(ParseSchemaError::new(format!(
-                    "invalid JSON for {}: {:?}",
-                    key, precision,
-                ))
-                .into()),
-            }
-        }
-        let precision = get_decimal_integer(complex, "precision")?;
-        let scale = get_decimal_integer(complex, "scale")?;
-        Ok((precision, scale))
-    }
-
     /// Parse a `serde_json::Value` representing a complex Avro type into a
     /// `Schema`.
     ///
     /// Avro supports "recursive" definition of types.
     /// e.g: {"type": {"type": "string"}}
     fn parse_complex(complex: &Map<String, Value>) -> Result<Self, Error> {
-        fn logical_verify_type(
-            complex: &Map<String, Value>,
-            kinds: &[SchemaKind],
-        ) -> Result<Schema, Error> {
-            match complex.get("type") {
-                Some(value) => {
-                    let ty = Schema::parse(value)?;
-                    if kinds
-                        .iter()
-                        .any(|&kind| SchemaKind::from(ty.clone()) == kind)
-                    {
-                        Ok(ty)
-                    } else {
-                        Err(ParseSchemaError::new(format!(
-                            "Unexpected `type` ({}) variant for `logicalType`",
-                            value
-                        ))
-                        .into())
-                    }
-                }
-                None => {
-                    Err(ParseSchemaError::new("No `type` field found for `logicalType`").into())
-                }
-            }
-        }
-        match complex.get("logicalType") {
-            Some(&Value::String(ref t)) => match t.as_str() {
-                "decimal" => {
-                    let inner = Box::new(logical_verify_type(
-                        complex,
-                        &[SchemaKind::Fixed, SchemaKind::Bytes],
-                    )?);
-
-                    let (precision, scale) = Self::parse_precision_and_scale(complex)?;
-
-                    return Ok(Schema::Decimal {
-                        precision,
-                        scale,
-                        inner,
-                    });
-                }
-                "uuid" => {
-                    logical_verify_type(complex, &[SchemaKind::String])?;
-                    return Ok(Schema::Uuid);
-                }
-                "date" => {
-                    logical_verify_type(complex, &[SchemaKind::Int])?;
-                    return Ok(Schema::Date);
-                }
-                "time-millis" => {
-                    logical_verify_type(complex, &[SchemaKind::Int])?;
-                    return Ok(Schema::TimeMillis);
-                }
-                "time-micros" => {
-                    logical_verify_type(complex, &[SchemaKind::Long])?;
-                    return Ok(Schema::TimeMicros);
-                }
-                "timestamp-millis" => {
-                    logical_verify_type(complex, &[SchemaKind::Long])?;
-                    return Ok(Schema::TimestampMillis);
-                }
-                "timestamp-micros" => {
-                    logical_verify_type(complex, &[SchemaKind::Long])?;
-                    return Ok(Schema::TimestampMicros);
-                }
-                "duration" => {
-                    logical_verify_type(complex, &[SchemaKind::Fixed])?;
-                    return Ok(Schema::Duration);
-                }
-                // In this case, of an unknown logical type, we just pass through to the underlying
-                // type.
-                _ => {}
-            },
-            // The spec says to ignore invalid logical types and just continue through to the
-            // underlying type - It is unclear whether that applies to this case or not, where the
-            // `logicalType` is not a string.
-            Some(_) => return Err(ParseSchemaError::new("logicalType must be a string").into()),
-            _ => {}
-        }
         match complex.get("type") {
             Some(&Value::String(ref t)) => match t.as_str() {
                 "record" => Schema::parse_record(complex),
@@ -669,12 +531,13 @@ impl Schema {
                 "fixed" => Schema::parse_fixed(complex),
                 other => Schema::parse_primitive(other),
             },
-            Some(&Value::Object(ref data)) => Schema::parse_complex(data),
-            Some(&Value::Array(ref variants)) => Schema::parse_union(variants),
-            Some(unknown) => {
-                Err(ParseSchemaError::new(format!("Unknown complex type: {0:?}", unknown)).into())
-            }
-            None => Err(ParseSchemaError::new("No `type` in complex type").into()),
+            Some(&Value::Object(ref data)) => match data.get("type") {
+                Some(ref value) => Schema::parse(value),
+                None => Err(
+                    ParseSchemaError::new(format!("Unknown complex type: {:?}", complex)).into(),
+                ),
+            },
+            _ => Err(ParseSchemaError::new("No `type` in complex type").into()),
         }
     }
 
@@ -852,67 +715,6 @@ impl Serialize for Schema {
                 map.serialize_entry("type", "fixed")?;
                 map.serialize_entry("name", &name.name)?;
                 map.serialize_entry("size", size)?;
-                map.end()
-            }
-            Schema::Decimal {
-                ref scale,
-                ref precision,
-                ref inner,
-            } => {
-                let mut map = serializer.serialize_map(None)?;
-                map.serialize_entry("type", &*inner.clone())?;
-                map.serialize_entry("logicalType", "decimal")?;
-                map.serialize_entry("scale", scale)?;
-                map.serialize_entry("precision", precision)?;
-                map.end()
-            }
-            Schema::Uuid => {
-                let mut map = serializer.serialize_map(None)?;
-                map.serialize_entry("type", "string")?;
-                map.serialize_entry("logicalType", "uuid")?;
-                map.end()
-            }
-            Schema::Date => {
-                let mut map = serializer.serialize_map(None)?;
-                map.serialize_entry("type", "int")?;
-                map.serialize_entry("logicalType", "date")?;
-                map.end()
-            }
-            Schema::TimeMillis => {
-                let mut map = serializer.serialize_map(None)?;
-                map.serialize_entry("type", "int")?;
-                map.serialize_entry("logicalType", "time-millis")?;
-                map.end()
-            }
-            Schema::TimeMicros => {
-                let mut map = serializer.serialize_map(None)?;
-                map.serialize_entry("type", "long")?;
-                map.serialize_entry("logicalType", "time-micros")?;
-                map.end()
-            }
-            Schema::TimestampMillis => {
-                let mut map = serializer.serialize_map(None)?;
-                map.serialize_entry("type", "long")?;
-                map.serialize_entry("logicalType", "timestamp-millis")?;
-                map.end()
-            }
-            Schema::TimestampMicros => {
-                let mut map = serializer.serialize_map(None)?;
-                map.serialize_entry("type", "long")?;
-                map.serialize_entry("logicalType", "timestamp-micros")?;
-                map.end()
-            }
-            Schema::Duration => {
-                let mut map = serializer.serialize_map(None)?;
-
-                // the Avro doesn't indicate what the name of the underlying fixed type of a
-                // duration should be or typically is.
-                let inner = Schema::Fixed {
-                    name: Name::new("duration"),
-                    size: 12,
-                };
-                map.serialize_entry("type", &inner)?;
-                map.serialize_entry("logicalType", "duration")?;
                 map.end()
             }
         }
@@ -1195,7 +997,7 @@ mod tests {
 
         let doc = match schema {
             Schema::Enum { doc, .. } => doc,
-            _ => return,
+            _ => return assert!(false),
         };
 
         assert!(doc.is_none());
@@ -1245,43 +1047,20 @@ mod tests {
         "name": "test",
         "fields": [
             {"name": "a", "type": "long", "default": 42},
-            {"name": "b", "type": "string"},
-            {"name": "c", "type": "long", "logicalType": "timestamp-micros"}
+            {"name": "b", "type": "string"}
         ]
     }
 "#;
 
         let schema = Schema::parse_str(raw_schema).unwrap();
         assert_eq!(
-            "7eb3b28d73dfc99bdd9af1848298b40804a2f8ad5d2642be2ecc2ad34842b987",
+            "c4d97949770866dec733ae7afa3046757e901d0cfea32eb92a8faeadcc4de153",
             format!("{}", schema.fingerprint::<Sha256>())
         );
 
         assert_eq!(
-            "cb11615e412ee5d872620d8df78ff6ae",
+            "7bce8188f28e66480a45ffbdc3615b7d",
             format!("{}", schema.fingerprint::<Md5>())
-        );
-    }
-
-    #[test]
-    fn test_logical_types() {
-        let schema = Schema::parse_str(r#"{"type": "int", "logicalType": "date"}"#).unwrap();
-        assert_eq!(schema, Schema::Date);
-
-        let schema =
-            Schema::parse_str(r#"{"type": "long", "logicalType": "timestamp-micros"}"#).unwrap();
-        assert_eq!(schema, Schema::TimestampMicros);
-    }
-
-    #[test]
-    fn test_nullable_logical_type() {
-        let schema = Schema::parse_str(
-            r#"{"type": ["null", {"type": "long", "logicalType": "timestamp-micros"}]}"#,
-        )
-        .unwrap();
-        assert_eq!(
-            schema,
-            Schema::Union(UnionSchema::new(vec![Schema::Null, Schema::TimestampMicros]).unwrap())
         );
     }
 }

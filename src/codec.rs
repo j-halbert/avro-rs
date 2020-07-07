@@ -2,10 +2,14 @@
 use std::io::{Read, Write};
 use std::str::FromStr;
 
+#[cfg(feature = "snappy")]
+use byteorder;
+#[cfg(feature = "snappy")]
+use crc;
 use failure::Error;
 use libflate::deflate::{Decoder, Encoder};
 
-use crate::types::Value;
+use crate::types::{ToAvro, Value};
 use crate::util::DecodeError;
 
 /// The compression codec used to compress blocks.
@@ -24,10 +28,10 @@ pub enum Codec {
     Snappy,
 }
 
-impl From<Codec> for Value {
-    fn from(value: Codec) -> Self {
-        Self::Bytes(
-            match value {
+impl ToAvro for Codec {
+    fn avro(self) -> Value {
+        Value::Bytes(
+            match self {
                 Codec::Null => "null",
                 Codec::Deflate => "deflate",
                 #[cfg(feature = "snappy")]
@@ -55,8 +59,8 @@ impl FromStr for Codec {
 
 impl Codec {
     /// Compress a stream of bytes in-place.
-    pub fn compress(self, stream: &mut Vec<u8>) -> Result<(), Error> {
-        match self {
+    pub fn compress(&self, stream: &mut Vec<u8>) -> Result<(), Error> {
+        match *self {
             Codec::Null => (),
             Codec::Deflate => {
                 let mut encoder = Encoder::new(Vec::new());
@@ -83,14 +87,17 @@ impl Codec {
     }
 
     /// Decompress a stream of bytes in-place.
-    pub fn decompress(self, stream: &mut Vec<u8>) -> Result<(), Error> {
-        *stream = match self {
-            Codec::Null => return Ok(()),
+    pub fn decompress(&self, stream: &mut Vec<u8>) -> Result<(), Error> {
+        match *self {
+            Codec::Null => (),
             Codec::Deflate => {
                 let mut decoded = Vec::new();
-                let mut decoder = Decoder::new(&stream[..]);
-                decoder.read_to_end(&mut decoded)?;
-                decoded
+                {
+                    // either the compiler or I is dumb
+                    let mut decoder = Decoder::new(&stream[..]);
+                    decoder.read_to_end(&mut decoded)?;
+                }
+                *stream = decoded;
             }
             #[cfg(feature = "snappy")]
             Codec::Snappy => {
@@ -110,9 +117,10 @@ impl Codec {
                     ))
                     .into());
                 }
-                decoded
+                *stream = decoded;
             }
         };
+
         Ok(())
     }
 }
@@ -121,7 +129,7 @@ impl Codec {
 mod tests {
     use super::*;
 
-    const INPUT: &[u8] = b"theanswertolifetheuniverseandeverythingis42theanswertolifetheuniverseandeverythingis4theanswertolifetheuniverseandeverythingis2";
+    static INPUT: &'static [u8] = b"theanswertolifetheuniverseandeverythingis42theanswertolifetheuniverseandeverythingis4theanswertolifetheuniverseandeverythingis2";
 
     #[test]
     fn null_compress_and_decompress() {
