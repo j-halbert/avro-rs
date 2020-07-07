@@ -1,4 +1,7 @@
-//! # avro-rs
+//! A library for working with [Apache Avro](https://avro.apache.org/) in Rust.
+//!
+//! Please check our [documentation](https://docs.rs/avro-rs) for examples, tutorials and API reference.
+//!
 //! **[Apache Avro](https://avro.apache.org/)** is a data serialization system which provides rich
 //! data structures and a compact, fast, binary data format.
 //!
@@ -24,19 +27,23 @@
 //! **avro-rs** provides a way to read and write both these data representations easily and
 //! efficiently.
 //!
+//! We also support:
+//! * C bindings for the crate at [avro-rs-ffi](https://github.com/flavray/avro-rs-ffi)
+//! * A Python wrapper for the library at [pyavro-rs](https://github.com/flavray/pyavro-rs)
+//!
 //! # Installing the library
 //!
 //!
 //! Add to your `Cargo.toml`:
 //!
-//! ```text
+//! ```toml
 //! [dependencies]
 //! avro-rs = "x.y"
 //! ```
 //!
 //! Or in case you want to leverage the **Snappy** codec:
 //!
-//! ```text
+//! ```toml
 //! [dependencies.avro-rs]
 //! version = "x.y"
 //! features = ["snappy"]
@@ -122,11 +129,10 @@
 //! // schema validation happens here
 //! writer.append(record).unwrap();
 //!
-//! // flushing makes sure that all data gets encoded
-//! writer.flush().unwrap();
-//!
 //! // this is how to get back the resulting avro bytecode
-//! let encoded = writer.into_inner();
+//! // this performs a flush operation to make sure data has been written, so it can fail
+//! // you can also call `writer.flush()` yourself without consuming the writer
+//! let encoded = writer.into_inner().unwrap();
 //! ```
 //!
 //! The vast majority of the times, schemas tend to define a record as a top-level container
@@ -156,7 +162,6 @@
 //!     b: String,
 //! }
 //!
-//! # fn main() {
 //! # let raw_schema = r#"
 //! #     {
 //! #         "type": "record",
@@ -180,12 +185,10 @@
 //! // schema validation happens here
 //! writer.append_ser(test).unwrap();
 //!
-//! // flushing makes sure that all data gets encoded
-//! writer.flush().unwrap();
-//!
 //! // this is how to get back the resulting avro bytecode
+//! // this performs a flush operation to make sure data is written, so it can fail
+//! // you can also call `writer.flush()` yourself without consuming the writer
 //! let encoded = writer.into_inner();
-//! # }
 //! ```
 //!
 //! The vast majority of the times, schemas tend to define a record as a top-level container
@@ -256,8 +259,7 @@
 //! # record.put("a", 27i64);
 //! # record.put("b", "foo");
 //! # writer.append(record).unwrap();
-//! # writer.flush().unwrap();
-//! # let input = writer.into_inner();
+//! # let input = writer.into_inner().unwrap();
 //! // reader creation can fail in case the input to read from is not Avro-compatible or malformed
 //! let reader = Reader::new(&input[..]).unwrap();
 //! ```
@@ -286,8 +288,7 @@
 //! # record.put("a", 27i64);
 //! # record.put("b", "foo");
 //! # writer.append(record).unwrap();
-//! # writer.flush().unwrap();
-//! # let input = writer.into_inner();
+//! # let input = writer.into_inner().unwrap();
 //!
 //! let reader_raw_schema = r#"
 //!     {
@@ -347,8 +348,7 @@
 //! # record.put("a", 27i64);
 //! # record.put("b", "foo");
 //! # writer.append(record).unwrap();
-//! # writer.flush().unwrap();
-//! # let input = writer.into_inner();
+//! # let input = writer.into_inner().unwrap();
 //! let reader = Reader::new(&input[..]).unwrap();
 //!
 //! // value is a Result  of an Avro Value in case the read operation fails
@@ -377,7 +377,6 @@
 //!     b: String,
 //! }
 //!
-//! # fn main() {
 //! # let raw_schema = r#"
 //! #     {
 //! #         "type": "record",
@@ -395,15 +394,13 @@
 //! #     b: "foo".to_owned(),
 //! # };
 //! # writer.append_ser(test).unwrap();
-//! # writer.flush().unwrap();
-//! # let input = writer.into_inner();
+//! # let input = writer.into_inner().unwrap();
 //! let reader = Reader::new(&input[..]).unwrap();
 //!
 //! // value is a Result in case the read operation fails
 //! for value in reader {
 //!     println!("{:?}", from_value::<Test>(&value.unwrap()));
 //! }
-//! # }
 //! ```
 //!
 //! # Putting everything together
@@ -453,9 +450,7 @@
 //!
 //!     writer.append_ser(test)?;
 //!
-//!     writer.flush()?;
-//!
-//!     let input = writer.into_inner();
+//!     let input = writer.into_inner()?;
 //!     let reader = Reader::with_schema(&schema, &input[..])?;
 //!
 //!     for record in reader {
@@ -464,10 +459,227 @@
 //!     Ok(())
 //! }
 //! ```
+//!
+//! `avro-rs` also supports the logical types listed in the [Avro specification](https://avro.apache.org/docs/current/spec.html#Logical+Types):
+//!
+//! 1. `Decimal` using the [`num_bigint`](https://docs.rs/num-bigint/0.2.6/num_bigint) crate
+//! 1. UUID using the [`uuid`](https://docs.rs/uuid/0.8.1/uuid) crate
+//! 1. Date, Time (milli) as `i32` and Time (micro) as `i64`
+//! 1. Timestamp (milli and micro) as `i64`
+//! 1. Duration as a custom type with `months`, `days` and `millis` accessor methods each of which returns an `i32`
+//!
+//! Note that the on-disk representation is identical to the underlying primitive/complex type.
+//!
+//! ### Read and write logical types
+//!
+//! ```rust
+//! use avro_rs::{
+//!     types::Record, types::Value, Codec, Days, Decimal, Duration, Millis, Months, Reader, Schema,
+//!     Writer,
+//! };
+//! use num_bigint::ToBigInt;
+//! use failure::Error;
+//!
+//! fn main() -> Result<(), Error> {
+//!     let raw_schema = r#"
+//!     {
+//!       "type": "record",
+//!       "name": "test",
+//!       "fields": [
+//!         {
+//!           "name": "decimal_fixed",
+//!           "type": {
+//!             "type": "fixed",
+//!             "size": 2,
+//!             "name": "decimal"
+//!           },
+//!           "logicalType": "decimal",
+//!           "precision": 4,
+//!           "scale": 2
+//!         },
+//!         {
+//!           "name": "decimal_var",
+//!           "type": "bytes",
+//!           "logicalType": "decimal",
+//!           "precision": 10,
+//!           "scale": 3
+//!         },
+//!         {
+//!           "name": "uuid",
+//!           "type": "string",
+//!           "logicalType": "uuid"
+//!         },
+//!         {
+//!           "name": "date",
+//!           "type": "int",
+//!           "logicalType": "date"
+//!         },
+//!         {
+//!           "name": "time_millis",
+//!           "type": "int",
+//!           "logicalType": "time-millis"
+//!         },
+//!         {
+//!           "name": "time_micros",
+//!           "type": "long",
+//!           "logicalType": "time-micros"
+//!         },
+//!         {
+//!           "name": "timestamp_millis",
+//!           "type": "long",
+//!           "logicalType": "timestamp-millis"
+//!         },
+//!         {
+//!           "name": "timestamp_micros",
+//!           "type": "long",
+//!           "logicalType": "timestamp-micros"
+//!         },
+//!         {
+//!           "name": "duration",
+//!           "type": {
+//!             "type": "fixed",
+//!             "size": 12,
+//!             "name": "duration"
+//!           },
+//!           "logicalType": "duration"
+//!         }
+//!       ]
+//!     }
+//!     "#;
+//!
+//!     let schema = Schema::parse_str(raw_schema)?;
+//!
+//!     println!("{:?}", schema);
+//!
+//!     let mut writer = Writer::with_codec(&schema, Vec::new(), Codec::Deflate);
+//!
+//!     let mut record = Record::new(writer.schema()).unwrap();
+//!     record.put("decimal_fixed", Decimal::from(9936.to_bigint().unwrap().to_signed_bytes_be()));
+//!     record.put("decimal_var", Decimal::from((-32442.to_bigint().unwrap()).to_signed_bytes_be()));
+//!     record.put("uuid", uuid::Uuid::new_v4());
+//!     record.put("date", Value::Date(1));
+//!     record.put("time_millis", Value::TimeMillis(2));
+//!     record.put("time_micros", Value::TimeMicros(3));
+//!     record.put("timestamp_millis", Value::TimestampMillis(4));
+//!     record.put("timestamp_micros", Value::TimestampMicros(5));
+//!     record.put("duration", Duration::new(Months::new(6), Days::new(7), Millis::new(8)));
+//!
+//!     writer.append(record)?;
+//!
+//!     let input = writer.into_inner()?;
+//!     let reader = Reader::with_schema(&schema, &input[..])?;
+//!
+//!     for record in reader {
+//!         println!("{:?}", record?);
+//!     }
+//!     Ok(())
+//! }
+//! ```
+//!
+//! ## Calculate Avro schema fingerprint
+//!
+//! This library supports calculating the following fingerprints:
+//!
+//!  - SHA-256
+//!  - MD5
+//!
+//! Note: Rabin fingerprinting is NOT SUPPORTED yet.
+//!
+//! An example of fingerprinting for the supported fingerprints:
+//!
+//! ```rust
+//! use avro_rs::Schema;
+//! use failure::Error;
+//! use md5::Md5;
+//! use sha2::Sha256;
+//!
+//! fn main() -> Result<(), Error> {
+//!     let raw_schema = r#"
+//!         {
+//!             "type": "record",
+//!             "name": "test",
+//!             "fields": [
+//!                 {"name": "a", "type": "long", "default": 42},
+//!                 {"name": "b", "type": "string"}
+//!             ]
+//!         }
+//!     "#;
+//!     let schema = Schema::parse_str(raw_schema)?;
+//!     println!("{}", schema.fingerprint::<Sha256>());
+//!     println!("{}", schema.fingerprint::<Md5>());
+//!     Ok(())
+//! }
+//! ```
+//!
+//! ## Ill-formed data
+//!
+//! In order to ease decoding, the Binary Encoding specification of Avro data
+//! requires some fields to have their length encoded alongside the data.
+//!
+//! If encoded data passed to a `Reader` has been ill-formed, it can happen that
+//! the bytes meant to contain the length of data are bogus and could result
+//! in extravagant memory allocation.
+//!
+//! To shield users from ill-formed data, `avro-rs` sets a limit (default: 512MB)
+//! to any allocation it will perform when decoding data.
+//!
+//! If you expect some of your data fields to be larger than this limit, be sure
+//! to make use of the `max_allocation_bytes` function before reading **any** data
+//! (we leverage Rust's [`std::sync::Once`](https://doc.rust-lang.org/std/sync/struct.Once.html)
+//! mechanism to initialize this value, if
+//! any call to decode is made before a call to `max_allocation_bytes`, the limit
+//! will be 512MB throughout the lifetime of the program).
+//!
+//!
+//! ```rust
+//! use avro_rs::max_allocation_bytes;
+//!
+//! max_allocation_bytes(2 * 1024 * 1024 * 1024);  // 2GB
+//!
+//! // ... happily decode large data
+//!
+//! ```
+//!
+//! ## Check schemas compatibility
+//!
+//! This library supports checking for schemas compatibility.
+//!
+//! Note: It does not yet support named schemas (more on
+//! https://github.com/flavray/avro-rs/pull/76).
+//!
+//! Examples of checking for compatibility:
+//!
+//! 1. Compatible schemas
+//!
+//! Explanation: an int array schema can be read by a long array schema- an int
+//! (32bit signed integer) fits into a long (64bit signed integer)
+//!
+//! ```rust
+//! use avro_rs::{Schema, schema_compatibility::SchemaCompatibility};
+//!
+//! let writers_schema = Schema::parse_str(r#"{"type": "array", "items":"int"}"#).unwrap();
+//! let readers_schema = Schema::parse_str(r#"{"type": "array", "items":"long"}"#).unwrap();
+//! assert_eq!(true, SchemaCompatibility::can_read(&writers_schema, &readers_schema));
+//! ```
+//!
+//! 2. Incompatible schemas (a long array schema cannot be read by an int array schema)
+//!
+//! Explanation: a long array schema cannot be read by an int array schema- a
+//! long (64bit signed integer) does not fit into an int (32bit signed integer)
+//!
+//! ```rust
+//! use avro_rs::{Schema, schema_compatibility::SchemaCompatibility};
+//!
+//! let writers_schema = Schema::parse_str(r#"{"type": "array", "items":"long"}"#).unwrap();
+//! let readers_schema = Schema::parse_str(r#"{"type": "array", "items":"int"}"#).unwrap();
+//! assert_eq!(false, SchemaCompatibility::can_read(&writers_schema, &readers_schema));
+//! ```
 
 mod codec;
 mod de;
+mod decimal;
 mod decode;
+mod duration;
 mod encode;
 mod reader;
 mod ser;
@@ -475,10 +687,13 @@ mod util;
 mod writer;
 
 pub mod schema;
+pub mod schema_compatibility;
 pub mod types;
 
 pub use crate::codec::Codec;
 pub use crate::de::{from_value, Error as DeError};
+pub use crate::decimal::Decimal;
+pub use crate::duration::{Days, Duration, Millis, Months};
 pub use crate::reader::{from_avro_datum, Reader};
 pub use crate::schema::{ParseSchemaError, Schema};
 pub use crate::ser::{to_value, Error as SerError};
@@ -532,8 +747,7 @@ mod tests {
         record.put("a", 27i64);
         record.put("b", "foo");
         writer.append(record).unwrap();
-        writer.flush().unwrap();
-        let input = writer.into_inner();
+        let input = writer.into_inner().unwrap();
         let mut reader = Reader::with_schema(&reader_schema, &input[..]).unwrap();
         assert_eq!(
             reader.next().unwrap().unwrap(),
@@ -575,8 +789,7 @@ mod tests {
         record.put("b", "foo");
         record.put("c", "clubs");
         writer.append(record).unwrap();
-        writer.flush().unwrap();
-        let input = writer.into_inner();
+        let input = writer.into_inner().unwrap();
         let mut reader = Reader::with_schema(&schema, &input[..]).unwrap();
         assert_eq!(
             reader.next().unwrap().unwrap(),
@@ -638,8 +851,7 @@ mod tests {
         record.put("b", "foo");
         record.put("c", "clubs");
         writer.append(record).unwrap();
-        writer.flush().unwrap();
-        let input = writer.into_inner();
+        let input = writer.into_inner().unwrap();
         let mut reader = Reader::with_schema(&reader_schema, &input[..]).unwrap();
         assert!(reader.next().unwrap().is_err());
         assert!(reader.next().is_none());
@@ -674,8 +886,7 @@ mod tests {
         record.put("b", "foo");
         record.put("c", "clubs");
         writer.append(record).unwrap();
-        writer.flush().unwrap();
-        let input = writer.into_inner();
+        let input = writer.into_inner().unwrap();
         let mut reader = Reader::new(&input[..]).unwrap();
         assert_eq!(
             reader.next().unwrap().unwrap(),

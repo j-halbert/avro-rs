@@ -4,7 +4,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## Unreleased
+
+## [0.10.0] - 2020-05-31
+### Changed
+- Writer::into_inner() now calls flush() and returns a Result
+
+### Added
+- Add utilited for schema compatibility check
+
+## [0.9.1] - 2020-05-02
+### Changed
+- Port benchmarks to criterion
+
+### Fixed
+- Fix bug in the reader buffer length
+
+## [0.9.0] - 2020-04-24
+### Added
+- Add support for logical types
+- Make writer block size configurable via builder pattern
+
+## [0.8.0] - 2020-04-15
+### Added
+- Partial rust enum serialization/deserialization support
 
 ## [0.7.0] - 2020-02-16
 ### Added

@@ -97,15 +97,19 @@ impl<R: Read> Block<R> {
     }
 
     fn fill_buf(&mut self, n: usize) -> Result<(), Error> {
-        // We don't have enough space in the buffer, need to grow it.
-        if n >= self.buf.capacity() {
-            self.buf.reserve(n);
-        }
-
-        unsafe {
-            self.buf.set_len(n);
-        }
-        self.reader.read_exact(&mut self.buf[..n])?;
+        // The buffer needs to contain exactly `n` elements, otherwise codecs will potentially read
+        // invalid bytes.
+        //
+        // The are two cases to handle here:
+        //
+        // 1. `n > self.buf.len()`:
+        //    In this case we call `Vec::resize`, which guarantees that `self.buf.len() == n`.
+        // 2. `n < self.buf.len()`:
+        //    We need to resize to ensure that the buffer len is safe to read `n` elements.
+        //
+        // TODO: Figure out a way to avoid having to truncate for the second case.
+        self.buf.resize(n, 0);
+        self.reader.read_exact(&mut self.buf)?;
         self.buf_idx = 0;
         Ok(())
     }
@@ -291,24 +295,29 @@ pub fn from_avro_datum<R: Read>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{Record, ToAvro};
+    use crate::types::Record;
     use crate::Reader;
     use std::io::Cursor;
 
-    static SCHEMA: &'static str = r#"
-            {
-                "type": "record",
-                "name": "test",
-                "fields": [
-                    {"name": "a", "type": "long", "default": 42},
-                    {"name": "b", "type": "string"}
-                ]
-            }
-        "#;
-    static UNION_SCHEMA: &'static str = r#"
-            ["null", "long"]
-        "#;
-    static ENCODED: &'static [u8] = &[
+    const SCHEMA: &str = r#"
+    {
+      "type": "record",
+      "name": "test",
+      "fields": [
+        {
+          "name": "a",
+          "type": "long",
+          "default": 42
+        },
+        {
+          "name": "b",
+          "type": "string"
+        }
+      ]
+    }
+    "#;
+    const UNION_SCHEMA: &str = r#"["null", "long"]"#;
+    const ENCODED: &[u8] = &[
         79u8, 98u8, 106u8, 1u8, 4u8, 22u8, 97u8, 118u8, 114u8, 111u8, 46u8, 115u8, 99u8, 104u8,
         101u8, 109u8, 97u8, 222u8, 1u8, 123u8, 34u8, 116u8, 121u8, 112u8, 101u8, 34u8, 58u8, 34u8,
         114u8, 101u8, 99u8, 111u8, 114u8, 100u8, 34u8, 44u8, 34u8, 110u8, 97u8, 109u8, 101u8, 34u8,
@@ -333,7 +342,7 @@ mod tests {
         let mut record = Record::new(&schema).unwrap();
         record.put("a", 27i64);
         record.put("b", "foo");
-        let expected = record.avro();
+        let expected = record.into();
 
         assert_eq!(
             from_avro_datum(&schema, &mut encoded, None).unwrap(),
@@ -365,7 +374,7 @@ mod tests {
         record2.put("a", 42i64);
         record2.put("b", "bar");
 
-        let expected = vec![record1.avro(), record2.avro()];
+        let expected = vec![record1.into(), record2.into()];
 
         for (i, value) in reader.enumerate() {
             assert_eq!(value.unwrap(), expected[i]);

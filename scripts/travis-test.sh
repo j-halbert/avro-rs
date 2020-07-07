@@ -1,7 +1,8 @@
-#!/bin/bash
-set -ev
+#!/usr/bin/env bash
+
+set -euvxo pipefail
+
+make clippy
 make release
 make test
-if [ "$TRAVIS_RUST_VERSION" = "nightly" ]; then
-    make benchmark
-fi
+cargo bench --no-run
