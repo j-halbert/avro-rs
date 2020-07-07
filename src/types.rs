@@ -66,6 +66,19 @@ pub enum Value {
     ///
     /// See [Record](types.Record) for a more user-friendly support.
     Record(Vec<(String, Value)>),
+    /// A date value.
+    ///
+    /// Serialized and deserialized as `i32` directly. Can only be deserialized properly with a
+    /// schema.
+    Date(i32),
+    /// Time in milliseconds.
+    TimeMillis(i32),
+    /// Time in microseconds.
+    TimeMicros(i64),
+    /// Timestamp in milliseconds.
+    TimestampMillis(i64),
+    /// Timestamp in microseconds.
+    TimestampMicros(i64),
 }
 
 /// Any structure implementing the [ToAvro](trait.ToAvro.html) trait will be usable
@@ -325,6 +338,11 @@ impl Value {
             Schema::Array(ref inner) => self.resolve_array(inner),
             Schema::Map(ref inner) => self.resolve_map(inner),
             Schema::Record { ref fields, .. } => self.resolve_record(fields),
+            Schema::Date => self.resolve_date(),
+            Schema::TimeMillis => self.resolve_time_millis(),
+            Schema::TimeMicros => self.resolve_time_micros(),
+            Schema::TimestampMillis => self.resolve_timestamp_millis(),
+            Schema::TimestampMicros => self.resolve_timestamp_micros(),
         }
     }
 
@@ -565,6 +583,62 @@ impl Value {
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(Value::Record(new_fields))
+    }
+
+    fn resolve_date(self) -> Result<Self, Error> {
+        match self {
+            Value::Date(d) | Value::Int(d) => Ok(Value::Date(d)),
+            other => {
+                Err(SchemaResolutionError::new(format!("Date expected, got {:?}", other)).into())
+            }
+        }
+    }
+
+    fn resolve_time_millis(self) -> Result<Self, Error> {
+        match self {
+            Value::TimeMillis(t) | Value::Int(t) => Ok(Value::TimeMillis(t)),
+            other => Err(SchemaResolutionError::new(format!(
+                "TimeMillis expected, got {:?}",
+                other
+            ))
+            .into()),
+        }
+    }
+
+    fn resolve_time_micros(self) -> Result<Self, Error> {
+        match self {
+            Value::TimeMicros(t) | Value::Long(t) => Ok(Value::TimeMicros(t)),
+            Value::Int(t) => Ok(Value::TimeMicros(i64::from(t))),
+            other => Err(SchemaResolutionError::new(format!(
+                "TimeMicros expected, got {:?}",
+                other
+            ))
+            .into()),
+        }
+    }
+
+    fn resolve_timestamp_millis(self) -> Result<Self, Error> {
+        match self {
+            Value::TimestampMillis(ts) | Value::Long(ts) => Ok(Value::TimestampMillis(ts)),
+            Value::Int(ts) => Ok(Value::TimestampMillis(i64::from(ts))),
+            other => Err(SchemaResolutionError::new(format!(
+                "TimestampMillis expected, got {:?}",
+                other
+            ))
+            .into()),
+        }
+    }
+
+    fn resolve_timestamp_micros(self) -> Result<Self, Error> {
+        match self {
+            Value::TimestampMicros(ts) | Value::Long(ts) => Ok(Value::TimestampMicros(ts)),
+            Value::Int(ts) => Ok(Value::TimestampMicros(i64::from(ts))),
+            other => Err(SchemaResolutionError::new(format!(
+                "TimestampMicros expected, got {:?}",
+                other
+            ))
+            .into()),
+        }
     }
 
     fn try_u8(self) -> Result<u8, Error> {

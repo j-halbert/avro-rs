@@ -99,6 +99,19 @@ pub enum Schema {
     },
     /// A `fixed` Avro schema.
     Fixed { name: Name, size: usize },
+    /// Logical type which represents the number of days since the unix epoch.
+    /// Serialization format is `Schema::Int`.
+    Date,
+    /// The time of day in number of milliseconds after midnight with no reference any calendar,
+    /// time zone or date in particular.
+    TimeMillis,
+    /// The time of day in number of microseconds after midnight with no reference any calendar,
+    /// time zone or date in particular.
+    TimeMicros,
+    /// An instant in time represented as the number of milliseconds after the UNIX epoch.
+    TimestampMillis,
+    /// An instant in time represented as the number of microseconds after the UNIX epoch.
+    TimestampMicros,
 }
 
 impl PartialEq for Schema {
@@ -137,6 +150,11 @@ pub(crate) enum SchemaKind {
     Record,
     Enum,
     Fixed,
+    Date,
+    TimeMillis,
+    TimeMicros,
+    TimestampMillis,
+    TimestampMicros,
 }
 
 impl fmt::Display for SchemaKind {
@@ -156,6 +174,11 @@ impl fmt::Display for SchemaKind {
             Record => write!(fmt, "record"),
             Enum => write!(fmt, "enum"),
             Fixed => write!(fmt, "fixed"),
+            Date => write!(fmt, "date"),
+            TimeMillis => write!(fmt, "time-millis"),
+            TimeMicros => write!(fmt, "time-micros"),
+            TimestampMillis => write!(fmt, "timestamp-millis"),
+            TimestampMicros => write!(fmt, "timestamp-micros"),
         }
     }
 }
@@ -179,6 +202,11 @@ impl<'a> From<&'a Schema> for SchemaKind {
             Schema::Record { .. } => SchemaKind::Record,
             Schema::Enum { .. } => SchemaKind::Enum,
             Schema::Fixed { .. } => SchemaKind::Fixed,
+            Schema::Date => SchemaKind::Date,
+            Schema::TimeMillis => SchemaKind::TimeMillis,
+            Schema::TimeMicros => SchemaKind::TimeMicros,
+            Schema::TimestampMillis => SchemaKind::TimestampMillis,
+            Schema::TimestampMicros => SchemaKind::TimestampMicros,
         }
     }
 }
@@ -201,6 +229,11 @@ impl<'a> From<&'a types::Value> for SchemaKind {
             types::Value::Record(_) => SchemaKind::Record,
             types::Value::Enum(_, _) => SchemaKind::Enum,
             types::Value::Fixed(_, _) => SchemaKind::Fixed,
+            types::Value::Date(_) => Self::Date,
+            types::Value::TimeMillis(_) => Self::TimeMillis,
+            types::Value::TimeMicros(_) => Self::TimeMicros,
+            types::Value::TimestampMillis(_) => Self::TimestampMillis,
+            types::Value::TimestampMicros(_) => Self::TimestampMicros,
         }
     }
 }
@@ -663,13 +696,13 @@ impl Serialize for Schema {
                 map.serialize_entry("type", "array")?;
                 map.serialize_entry("items", &*inner.clone())?;
                 map.end()
-            }
+            },
             Schema::Map(ref inner) => {
                 let mut map = serializer.serialize_map(Some(2))?;
                 map.serialize_entry("type", "map")?;
                 map.serialize_entry("values", &*inner.clone())?;
                 map.end()
-            }
+            },
             Schema::Union(ref inner) => {
                 let variants = inner.variants();
                 let mut seq = serializer.serialize_seq(Some(variants.len()))?;
@@ -677,7 +710,7 @@ impl Serialize for Schema {
                     seq.serialize_element(v)?;
                 }
                 seq.end()
-            }
+            },
             Schema::Record {
                 ref name,
                 ref doc,
@@ -698,7 +731,7 @@ impl Serialize for Schema {
                 }
                 map.serialize_entry("fields", fields)?;
                 map.end()
-            }
+            },
             Schema::Enum {
                 ref name,
                 ref symbols,
@@ -709,14 +742,44 @@ impl Serialize for Schema {
                 map.serialize_entry("name", &name.name)?;
                 map.serialize_entry("symbols", symbols)?;
                 map.end()
-            }
+            },
             Schema::Fixed { ref name, ref size } => {
                 let mut map = serializer.serialize_map(None)?;
                 map.serialize_entry("type", "fixed")?;
                 map.serialize_entry("name", &name.name)?;
                 map.serialize_entry("size", size)?;
                 map.end()
-            }
+            },
+            Schema::Date => {
+                let mut map = serializer.serialize_map(None)?;
+                map.serialize_entry("type", "int")?;
+                map.serialize_entry("logicalType", "date")?;
+                map.end()
+            },
+            Schema::TimeMillis => {
+                let mut map = serializer.serialize_map(None)?;
+                map.serialize_entry("type", "int")?;
+                map.serialize_entry("logicalType", "time-millis")?;
+                map.end()
+            },
+            Schema::TimeMicros => {
+                let mut map = serializer.serialize_map(None)?;
+                map.serialize_entry("type", "long")?;
+                map.serialize_entry("logicalType", "time-micros")?;
+                map.end()
+            },
+            Schema::TimestampMillis => {
+                let mut map = serializer.serialize_map(None)?;
+                map.serialize_entry("type", "long")?;
+                map.serialize_entry("logicalType", "timestamp-millis")?;
+                map.end()
+            },
+            Schema::TimestampMicros => {
+                let mut map = serializer.serialize_map(None)?;
+                map.serialize_entry("type", "long")?;
+                map.serialize_entry("logicalType", "timestamp-micros")?;
+                map.end()
+            },
         }
     }
 }
