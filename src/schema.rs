@@ -351,7 +351,7 @@ impl UnionSchema {
                 );
             }
 
-            if let Schema::Record { name, .. } => {
+            if let Schema::Record { name, .. } = schema {
                 let full_name = name.fullname(None);
                 if nindex.insert(full_name.clone(), i).is_some() {
                     Err(ParseSchemaError::new(
@@ -368,6 +368,7 @@ impl UnionSchema {
         }
         Ok(UnionSchema {
             schemas,
+            name_index: nindex,
             variant_index: vindex,
         })
     }
