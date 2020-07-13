@@ -27,6 +27,12 @@ pub struct StructSerializer {
     fields: Vec<(String, Value)>,
 }
 
+pub struct StructVariantSerializer<'a> {
+    index: u32,
+    variant: &'a str,
+    fields: Vec<(String, Value)>,
+}
+
 /// Represents errors that could be encountered while serializing data
 #[derive(Clone, Debug, PartialEq)]
 pub struct Error {
@@ -83,6 +89,16 @@ impl StructSerializer {
     }
 }
 
+impl<'a> StructVariantSerializer<'a> {
+    pub fn new(index: u32, variant: &'a str, len: usize) -> StructVariantSerializer {
+        StructVariantSerializer {
+            index,
+            variant,
+            fields: Vec::with_capacity(len),
+        }
+    }
+}
+
 impl<'b> ser::Serializer for &'b mut Serializer {
     type Ok = Value;
     type Error = Error;
@@ -92,7 +108,7 @@ impl<'b> ser::Serializer for &'b mut Serializer {
     type SerializeTupleVariant = SeqSerializer;
     type SerializeMap = MapSerializer;
     type SerializeStruct = StructSerializer;
-    type SerializeStructVariant = StructSerializer;
+    type SerializeStructVariant = StructVariantSerializer<'b>;
 
     fn serialize_bool(self, v: bool) -> Result<Self::Ok, Self::Error> {
         Ok(Value::Boolean(v))
@@ -252,11 +268,11 @@ impl<'b> ser::Serializer for &'b mut Serializer {
     fn serialize_struct_variant(
         self,
         _: &'static str,
-        _: u32,
-        _: &'static str,
-        _: usize,
+        index: u32,
+        variant: &'static str,
+        len: usize,
     ) -> Result<Self::SerializeStructVariant, Self::Error> {
-        unimplemented!() // TODO ?
+        Ok(StructVariantSerializer::new(index, variant, len))
     }
 }
 
@@ -386,6 +402,39 @@ impl ser::SerializeStruct for StructSerializer {
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
         Ok(Value::Record(self.fields))
+    }
+}
+
+impl<'a> ser::SerializeStructVariant for StructVariantSerializer<'a> {
+    type Ok = Value;
+    type Error = Error;
+
+    fn serialize_field<T: ?Sized>(
+        &mut self,
+        name: &'static str,
+        value: &T,
+    ) -> Result<(), Self::Error>
+    where
+        T: Serialize,
+    {
+        self.fields.push((
+            name.to_owned(),
+            value.serialize(&mut Serializer::default())?,
+        ));
+        Ok(())
+    }
+
+    fn end(self) -> Result<Self::Ok, Self::Error> {
+        Ok(Value::Record(vec![
+            (
+                "type".to_owned(),
+                Value::Enum(self.index as i32, self.variant.to_owned()),
+            ),
+            (
+                "value".to_owned(),
+                Value::Union(Box::new(Value::Record(self.fields))),
+            ),
+        ]))
     }
 }
 
