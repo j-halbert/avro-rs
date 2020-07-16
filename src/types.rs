@@ -301,6 +301,10 @@ impl Value {
                         },
                     )
             }
+            (&Value::Record(ref record_fields), &Schema::Union(ref inner)) => {
+                println!("found record validated against union schema!");
+                false
+            }
             _ => false,
         }
     }
