@@ -311,11 +311,13 @@ impl<'a, W: Write> Writer<'a, W> {
 ///
 /// This is an internal function which gets the bytes buffer where to write as parameter instead of
 /// creating a new one like `to_avro_datum`.
-fn write_avro_datum<T: ToAvro>(
+fn write_avro_datum<T: ToAvro + std::fmt::Debug>(
     schema: &Schema,
     value: T,
     buffer: &mut Vec<u8>,
 ) -> Result<(), Error> {
+    println!("{:#?}", &value);
+    println!("{:#?}", schema);
     let avro = value.avro();
     if !avro.validate(schema) {
         return Err(ValidationError::new("value does not match schema").into());
@@ -338,7 +340,7 @@ fn write_value_ref(schema: &Schema, value: &Value, buffer: &mut Vec<u8>) -> Resu
 /// **NOTE** This function has a quite small niche of usage and does NOT generate headers and sync
 /// markers; use [`Writer`](struct.Writer.html) to be fully Avro-compatible if you don't know what
 /// you are doing, instead.
-pub fn to_avro_datum<T: ToAvro>(schema: &Schema, value: T) -> Result<Vec<u8>, Error> {
+pub fn to_avro_datum<T: ToAvro + std::fmt::Debug>(schema: &Schema, value: T) -> Result<Vec<u8>, Error> {
     let mut buffer = Vec::new();
     write_avro_datum(schema, value, &mut buffer)?;
     Ok(buffer)
