@@ -302,8 +302,26 @@ impl Value {
                     )
             }
             (&Value::Record(ref record_fields), &Schema::Union(ref inner)) => {
-                println!("found record validated against union schema!");
-                false
+                let union_variants = inner.variants();
+                if let (_type, Value::Enum(i, ref enum_var_name)) = &record_fields[0] {
+                    if let Some(union_variant) = union_variants.iter().find(|uvs| {
+                        if let Schema::Record { ref name, .. } = uvs {
+                            name.name.as_str() == enum_var_name.as_str() 
+                        } else {
+                            false
+                        }
+                    }) {
+                        if let (_value, Value::Union(record)) = &record_fields[1] {
+                            record_fields[1].1.validate(&Schema::Union(inner.clone()))
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
             }
             _ => false,
         }

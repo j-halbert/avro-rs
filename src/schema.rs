@@ -447,7 +447,6 @@ impl UnionSchema {
     /// within this union.
     pub fn find_schema(&self, value: &crate::types::Value) -> Option<(usize, &Schema)> {
         let kind = SchemaKind::from(value);
-        println!("find_schema {:?}", value);
         match kind {
             // named types
             SchemaKind::Record => {
