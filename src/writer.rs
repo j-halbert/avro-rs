@@ -316,9 +316,7 @@ fn write_avro_datum<T: ToAvro>(
     value: T,
     buffer: &mut Vec<u8>,
 ) -> Result<(), Error> {
-    println!("Schema: {:#?}", schema);
     let avro = value.avro();
-    println!("Value: {:#?}", &avro);
     if !avro.validate(schema) {
         return Err(ValidationError::new("value does not match schema").into());
     }
