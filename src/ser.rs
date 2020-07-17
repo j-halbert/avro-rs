@@ -425,16 +425,7 @@ impl<'a> ser::SerializeStructVariant for StructVariantSerializer<'a> {
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::Record(vec![
-            (
-                "type".to_owned(),
-                Value::Enum(self.index as i32, self.variant.to_owned()),
-            ),
-            (
-                "value".to_owned(),
-                Value::Union(Box::new(Value::Record(self.fields))),
-            ),
-        ]))
+        Ok(Value::Union(Box::new(Value::Record(self.fields))))
     }
 }
 
